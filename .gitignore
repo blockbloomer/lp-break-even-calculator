@@ -1,0 +1,12 @@
+node_modules/
+.env
+.env.*
+!.env.example
+dist/
+build/
+.next/
+.DS_Store
+coverage/
+.cache/
+*.log
+*.pid
