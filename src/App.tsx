@@ -1,6 +1,6 @@
 import { useId, useState, useSyncExternalStore } from 'react';
 import type { ReactNode } from 'react';
-import { calculateLPBreakEven } from './lib/calculator.ts';
+import { calculateLPBreakEven, MAX_APR_PERCENT } from './lib/calculator.ts';
 import type { CalculationSuccess, ExitScenario } from './lib/calculator.ts';
 import { amount, duration, durationParts, money } from './lib/format.ts';
 import { EXAMPLE, parseParameter, toCalculatorInput } from './lib/parameters.ts';
@@ -26,14 +26,14 @@ function Icon({ name, className = '' }: { name: 'mark' | 'arrow' | 'reset' | 'ch
   return <svg className={`icon ${className}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{paths[name]}</svg>;
 }
 
-function SliderField({ label, value, onChange, suffix, error, hint, min = 0, max, step, disabled = false, compact = false }: {
+function SliderField({ label, value, onChange, suffix, error, hint, min = 0, max, step, fixedMax = false, disabled = false, compact = false }: {
   label: string; value: string; onChange: (value: string) => void; suffix: string; error?: string; hint?: string;
-  min?: number; max: number; step: number; disabled?: boolean; compact?: boolean;
+  min?: number; max: number; step: number; fixedMax?: boolean; disabled?: boolean; compact?: boolean;
 }) {
   const id = useId();
   const numeric = parseParameter(value);
   const actualMin = Number.isFinite(numeric) && numeric >= 0 ? Math.min(min, numeric) : min;
-  const actualMax = Number.isFinite(numeric) ? Math.max(max, numeric) : max;
+  const actualMax = !fixedMax && Number.isFinite(numeric) ? Math.max(max, numeric) : max;
   const selected = Number.isFinite(numeric) ? Math.max(actualMin, Math.min(actualMax, numeric)) : actualMin;
   const [coefficient, exponent = '0'] = value.toLowerCase().split('e');
   const decimalPlaces = Math.max(0, (coefficient.split('.')[1]?.length ?? 0) - Number(exponent));
@@ -41,7 +41,7 @@ function SliderField({ label, value, onChange, suffix, error, hint, min = 0, max
   const fraction = (selected - actualMin) / (actualMax - actualMin);
   return <div className={`slider-field ${compact ? 'slider-compact' : ''} ${disabled ? 'slider-disabled' : ''}`}>
     <div className="slider-heading"><label htmlFor={id}>{label}</label><div className={`slider-value ${error ? 'has-error' : ''}`}>
-      <input type="number" inputMode="decimal" min={min} step="any" value={value} disabled={disabled} aria-label={`${label}精确数值`}
+      <input type="number" inputMode="decimal" min={min} max={fixedMax ? max : undefined} step="any" value={value} disabled={disabled} aria-label={`${label}精确数值`}
         title="点击数字可精确修改" onChange={event => onChange(event.target.value)} aria-invalid={Boolean(error)} aria-describedby={error || hint ? `${id}-help` : undefined} />
       <span aria-hidden="true">{suffix}</span>
     </div></div>
@@ -163,7 +163,7 @@ export default function App() {
     setIsExample(false);
     setForm(previous => ({ ...previous, [key]: value }));
   };
-  const slider = (key: ParameterKey, label: string, suffix: string, options: { min?: number; max: number; step: number; hint?: string; compact?: boolean; disabled?: boolean; value?: string }) =>
+  const slider = (key: ParameterKey, label: string, suffix: string, options: { min?: number; max: number; step: number; fixedMax?: boolean; hint?: string; compact?: boolean; disabled?: boolean; value?: string }) =>
     <SliderField label={label} value={options.value ?? form[key]} onChange={value => update(key, value)} suffix={suffix} error={errors[key]} {...options} />;
   const reset = () => { setForm({ ...EXAMPLE }); setAutomaticHaircut(true); setIsExample(true); };
   const quickWidth = (width: number) => {
@@ -190,7 +190,7 @@ export default function App() {
             <h3 id="investment-title">投入与实时年化</h3>
             {slider('capital', '净入池本金', 'USD', { min: 100, max: 20000, step: 100, hint: '不含 gas 和本次换币成本' })}
             <div className="quick-row capital-presets"><span>本金</span>{[1000, 5000, 10000].map(value => <button type="button" aria-pressed={form.capital === String(value)} key={value} onClick={() => update('capital', String(value))}>${amount(value)}</button>)}</div>
-            {slider('aprPercent', '当前区间实时 APR', '%', { max: 20000, step: 100, hint: '直接用你当前仓位的手续费年化，不按区间再调整' })}
+            {slider('aprPercent', '当前区间实时 APR', '%', { max: MAX_APR_PERCENT, step: 100, fixedMax: true, hint: '最高 100,000%。直接用当前区间手续费年化，不再调整' })}
             <div className="quick-row"><span>年化</span>{[1000, 5000, 10000].map(value => <button type="button" aria-pressed={form.aprPercent === String(value)} key={value} onClick={() => update('aprPercent', String(value))}>{amount(value)}%</button>)}</div>
           </section>
 

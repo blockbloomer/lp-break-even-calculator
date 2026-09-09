@@ -126,6 +126,15 @@ test('APR stays constant when the range changes', () => {
   near(calculate({ range: { mode: 'bounds', lowerPrice: 99, upperPrice: 101 } }).netHourlyFee, calculate().netHourlyFee);
 });
 
+test('accepts APR up to 100,000 percent and rejects values above the ceiling', () => {
+  near(calculate({ aprPercent: 100_000 }).netHourlyFee, 5000 * 1000 / 8760);
+  for (const aprPercent of [100_000.01, 100_001, 1_000_000]) {
+    const result = calculateLPBreakEven({ ...base, aprPercent });
+    assert.equal(result.ok, false);
+    if (!result.ok) assert.match(result.errors.aprPercent, /100,000/);
+  }
+});
+
 test('one-to-nine means buying ten percent and affects entry costs only', () => {
   const costs = { gasIn: 2, gasOut: 2, feeInPercent: 0.3, feeOutPercent: 0.3, wearInPercent: 0.1, wearOutPercent: 0.1 };
   const r = calculate({ ...costs, entryBuyPercent: 10 });

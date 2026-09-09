@@ -1,3 +1,5 @@
+export const MAX_APR_PERCENT = 100_000;
+
 export type RangeInput =
   | { mode: 'bounds'; lowerPrice: number; upperPrice: number }
   | { mode: 'ratio'; lowerPrice: number; tokenPercent: number };
@@ -150,6 +152,7 @@ export function calculateLPBreakEven(input: CalculatorInput): CalculationSuccess
   positive('currentPrice', input.currentPrice, '当前币价');
   positive('lowerPrice', input.range.lowerPrice, '价格下限');
   nonnegative('aprPercent', input.aprPercent, '手续费 APR');
+  if (input.aprPercent > MAX_APR_PERCENT) errors.aprPercent = '手续费 APR 最高为 100,000%。';
   percent('entryBuyPercent', input.entryBuyPercent, '开仓买币比例');
   nonnegative('gasIn', input.gasIn, '进场 gas');
   nonnegative('gasOut', input.gasOut, '退出 gas');
