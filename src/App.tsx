@@ -1,16 +1,11 @@
-import { useId, useRef, useState, useSyncExternalStore } from 'react';
+import { useId, useState, useSyncExternalStore } from 'react';
 import type { ReactNode } from 'react';
 import { calculateLPBreakEven } from './lib/calculator.ts';
-import type { CalculationSuccess, CalculatorInput, ExitScenario } from './lib/calculator.ts';
-import { amount, duration, durationParts, money, price } from './lib/format.ts';
+import type { CalculationSuccess, ExitScenario } from './lib/calculator.ts';
+import { amount, duration, durationParts, money } from './lib/format.ts';
+import { EXAMPLE, parseParameter, toCalculatorInput } from './lib/parameters.ts';
+import type { ParameterKey, Parameters } from './lib/parameters.ts';
 
-type FormValues = Record<'capital' | 'aprPercent' | 'currentPrice' | 'lowerPrice' | 'upperPrice' | 'tokenPercent' | 'gasIn' | 'gasOut' | 'feeInPercent' | 'wearInPercent' | 'feeOutPercent' | 'wearOutPercent' | 'feeHaircutPercent', string>;
-type FieldKey = keyof FormValues;
-const EXAMPLE: FormValues = {
-  capital: '5000', aprPercent: '5000', currentPrice: '100', lowerPrice: '98', upperPrice: '102', tokenPercent: '50',
-  gasIn: '2', gasOut: '2', feeInPercent: '0.3', wearInPercent: '0.1', feeOutPercent: '0.3', wearOutPercent: '0.1', feeHaircutPercent: '0.3997',
-};
-const parse = (raw: string) => raw.trim() === '' ? NaN : Number(raw);
 const percentage = (p: number, current: number) => `${p >= current ? '+' : '−'}${amount(Math.abs(p / current - 1) * 100, 2)}%`;
 const subscribeToCompact = (callback: () => void) => {
   const query = window.matchMedia('(max-width: 480px)');
@@ -31,24 +26,35 @@ function Icon({ name, className = '' }: { name: 'mark' | 'arrow' | 'reset' | 'ch
   return <svg className={`icon ${className}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{paths[name]}</svg>;
 }
 
-function Field({ label, value, onChange, suffix, error, hint, hiddenLabel = false, disabled = false, compact = false }: {
+function SliderField({ label, value, onChange, suffix, error, hint, min = 0, max, step, disabled = false, compact = false }: {
   label: string; value: string; onChange: (value: string) => void; suffix: string; error?: string; hint?: string;
-  hiddenLabel?: boolean; disabled?: boolean; compact?: boolean;
+  min?: number; max: number; step: number; disabled?: boolean; compact?: boolean;
 }) {
   const id = useId();
-  return <div className={`field ${compact ? 'field-compact' : ''}`}>
-    <label htmlFor={id} className={hiddenLabel ? 'sr-only' : 'field-label'}>{label}</label>
-    <div className={`input-shell ${error ? 'has-error' : ''} ${disabled ? 'is-disabled' : ''}`}>
-      <input id={id} type="number" inputMode="decimal" min="0" step="any" value={value} disabled={disabled}
-        onChange={event => onChange(event.target.value)} aria-invalid={Boolean(error)} aria-describedby={error || hint ? `${id}-help` : undefined} />
-      <span className="input-suffix" aria-hidden="true">{suffix}</span>
+  const numeric = parseParameter(value);
+  const actualMin = Number.isFinite(numeric) && numeric >= 0 ? Math.min(min, numeric) : min;
+  const actualMax = Number.isFinite(numeric) ? Math.max(max, numeric) : max;
+  const selected = Number.isFinite(numeric) ? Math.max(actualMin, Math.min(actualMax, numeric)) : actualMin;
+  const [coefficient, exponent = '0'] = value.toLowerCase().split('e');
+  const decimalPlaces = Math.max(0, (coefficient.split('.')[1]?.length ?? 0) - Number(exponent));
+  const actualStep = Number.isFinite(decimalPlaces) ? Math.min(step, 10 ** -Math.min(decimalPlaces, 12)) : step;
+  const fraction = (selected - actualMin) / (actualMax - actualMin);
+  return <div className={`slider-field ${compact ? 'slider-compact' : ''} ${disabled ? 'slider-disabled' : ''}`}>
+    <div className="slider-heading"><label htmlFor={id}>{label}</label><div className={`slider-value ${error ? 'has-error' : ''}`}>
+      <input type="number" inputMode="decimal" min={min} step="any" value={value} disabled={disabled} aria-label={`${label}精确数值`}
+        title="点击数字可精确修改" onChange={event => onChange(event.target.value)} aria-invalid={Boolean(error)} aria-describedby={error || hint ? `${id}-help` : undefined} />
+      <span aria-hidden="true">{suffix}</span>
+    </div></div>
+    <div className="slider-control"><div className="slider-track"><span style={{ transform: `scaleX(${fraction})` }} /></div>
+      <input id={id} type="range" min={actualMin} max={actualMax} step={actualStep} value={selected} disabled={disabled}
+        onChange={event => onChange(event.target.value)} aria-valuetext={`${value} ${suffix}`} aria-invalid={Boolean(error)} aria-describedby={error || hint ? `${id}-help` : undefined} />
     </div>
     {(error || hint) && <span id={`${id}-help`} className={error ? 'field-error' : 'field-hint'}>{error || hint}</span>}
   </div>;
 }
 
 function TimeValue({ hours, small = false }: { hours: number | null; small?: boolean }) {
-  if (hours === null) return <span className={small ? '' : 'unavailable-value'}>当前参数下无法回本</span>;
+  if (hours === null) return <span className={small ? '' : 'unavailable-value'}>当前参数下无法覆盖成本</span>;
   return <span className={`time-value ${small ? 'time-small' : ''}`}>
     {durationParts(hours).map(part => <span className="time-part" key={part.unit}><strong>{part.value}</strong><span>{part.unit}</span></span>)}
   </span>;
@@ -74,7 +80,7 @@ function FeeChart({ result }: { result: CalculationSuccess }) {
   const selectedRevenue = selectedHour === null ? null : selectedHour * netHourlyFee;
   const lineEnd = y(netHourlyFee * maxHours);
 
-  return <section className="chart-section" aria-label="手续费累计与回本时间">
+  return <section className="chart-section" aria-label="手续费累计与成本覆盖时间">
     <div className="section-heading chart-heading"><h3>手续费如何覆盖成本</h3><div className="chart-legend"><span><i className="legend-line" />净手续费</span><span><i className="legend-line cost-line" />待覆盖金额</span></div></div>
     <svg className="fee-chart" viewBox={`0 0 ${chartWidth} 246`} role="img" aria-labelledby={`${titleId} ${descriptionId}`}
       onPointerMove={event => {
@@ -83,7 +89,7 @@ function FeeChart({ result }: { result: CalculationSuccess }) {
         setHoverRatio(Math.max(0, Math.min(1, (svgX - left) / (right - left))));
       }} onPointerLeave={() => setHoverRatio(null)}>
       <title id={titleId}>累计净手续费与待覆盖成本的交点</title>
-      <desc id={descriptionId}>每有效做市一小时收取净手续费 {money(netHourlyFee)}，需覆盖 {money(requiredFees)}，{breakEvenHours === null ? '当前参数下无法回本' : `约 ${duration(breakEvenHours)} 覆盖成本`}。随后按下沿价格退出。</desc>
+      <desc id={descriptionId}>每有效做市一小时收取净手续费 {money(netHourlyFee)}，需覆盖 {money(requiredFees)}，{breakEvenHours === null ? '当前参数下无法覆盖成本' : `约 ${duration(breakEvenHours)} 覆盖成本`}。随后按下沿价格退出。</desc>
       {[0, 1, 2, 3].map(index => {
         const value = maxValue * index / 3;
         return <g key={index}><line x1={left} x2={right} y1={y(value)} y2={y(value)} className="chart-grid" /><text x={left - 12} y={y(value) + 4} textAnchor="end" className="chart-label">{value >= 10000 ? `${amount(value / 1000, 1)}k` : amount(value, value < 1 ? 4 : 0)}</text></g>;
@@ -98,7 +104,7 @@ function FeeChart({ result }: { result: CalculationSuccess }) {
         <circle cx={x(selectedHour)} cy={y(selectedRevenue)} r="6" className="chart-point" />
         {hoverRatio === null && <g transform={`translate(${Math.min(right - 109, Math.max(left, x(selectedHour) - 55))},${Math.max(3, y(selectedRevenue) - 35)})`}>
           <rect width="110" height="26" rx="5" className="chart-callout" />
-          <text x="55" y="17" textAnchor="middle" className="chart-callout-text">回本点 {amount(selectedHour * xScale, 2)} {xUnit}</text>
+          <text x="55" y="17" textAnchor="middle" className="chart-callout-text">覆盖点 {amount(selectedHour * xScale, 2)} {xUnit}</text>
         </g>}
       </g>}
       <text x={right} y="244" textAnchor="end" className="chart-label">有效做市时间 / {xUnit}</text>
@@ -114,8 +120,8 @@ function Ledger({ result }: { result: CalculationSuccess }) {
   return <section className="ledger-section">
     <div className="section-heading"><h3>这笔账，要覆盖什么</h3><span className="muted">下沿退出</span></div>
     <dl className="ledger">
-      <div><dt><span className="ledger-dot price-dot" />LP 本金损失<span className="ledger-detail">价格跌到 {price(s.price)}，含持仓比例变化</span></dt><dd>{money(s.capitalLoss)}</dd></div>
-      <div><dt><span className="ledger-dot" />开仓换币损耗<span className="ledger-detail">兑换费 {money(result.entrySwapFee)} · 成交磨损 {money(result.entryExecutionWear)}</span></dt><dd>{money(result.entrySwapLoss)}</dd></div>
+      <div><dt><span className="ledger-dot price-dot" />美元本金损失<span className="ledger-detail">币价下跌 {money(s.marketLoss)} + 无常损失 {money(s.impermanentLoss)}</span></dt><dd>{money(s.capitalLoss)}</dd></div>
+      <div><dt><span className="ledger-dot" />开仓换币损耗<span className="ledger-detail">买币目标 {money(result.entryBuyValue)}；兑换费 {money(result.entrySwapFee)} + 磨损 {money(result.entryExecutionWear)}</span></dt><dd>{money(result.entrySwapLoss)}</dd></div>
       <div><dt><span className="ledger-dot" />退出换币损耗<span className="ledger-detail">兑换费 {money(s.exitSwapFee)} · 成交磨损 {money(s.exitExecutionWear)}</span></dt><dd>{money(s.exitSwapLoss)}</dd></div>
       <div><dt><span className="ledger-dot gas-dot" />进出场 Gas</dt><dd>{money(result.totalGas)}</dd></div>
       <div className="ledger-total"><dt>共需手续费覆盖</dt><dd>{money(result.requiredFees)}</dd></div>
@@ -128,9 +134,9 @@ function ScenarioTable({ result }: { result: CalculationSuccess }) {
   const rows: [string, ExitScenario, boolean][] = [['下沿退出', result.scenarios.lower, true], ['原价退出', result.scenarios.current, false], ['上沿退出', result.scenarios.upper, false]];
   return <section className="scenario-section">
     <div className="section-heading"><h3>换个退出价格看看</h3><span className="muted">全部换回稳定币</span></div>
-    <div className="scenario-scroll"><table className="scenario-table"><thead><tr><th>退出情景</th><th>撤回净值</th><th>需补手续费</th><th>回本时间</th></tr></thead><tbody>
+    <div className="scenario-scroll"><table className="scenario-table"><thead><tr><th>退出情景</th><th>撤回净值</th><th>需补手续费</th><th>覆盖时间</th></tr></thead><tbody>
       {rows.map(([label, scenario, highlight]) => <tr key={label} className={highlight ? 'scenario-highlight' : ''}>
-        <th scope="row">{label}<span>{price(scenario.price)}</span></th>
+        <th scope="row">{label}<span>{percentage(scenario.price, result.position.currentPrice)}</span></th>
         <td>{money(scenario.exitNetValue)}</td><td>{money(scenario.requiredFees)}</td><td>{duration(scenario.breakEvenHours)}</td>
       </tr>)}
     </tbody></table></div>
@@ -139,119 +145,91 @@ function ScenarioTable({ result }: { result: CalculationSuccess }) {
 }
 
 export default function App() {
-  const [form, setForm] = useState<FormValues>({ ...EXAMPLE });
-  const [mode, setMode] = useState<'bounds' | 'ratio'>('bounds');
+  const [form, setForm] = useState<Parameters>({ ...EXAMPLE });
   const [automaticHaircut, setAutomaticHaircut] = useState(true);
   const [isExample, setIsExample] = useState(true);
-  const lastValidPrice = useRef(parse(EXAMPLE.currentPrice));
-
-  const input: CalculatorInput = {
-    capital: parse(form.capital), aprPercent: parse(form.aprPercent), currentPrice: parse(form.currentPrice),
-    range: mode === 'bounds'
-      ? { mode, lowerPrice: parse(form.lowerPrice), upperPrice: parse(form.upperPrice) }
-      : { mode, lowerPrice: parse(form.lowerPrice), tokenPercent: parse(form.tokenPercent) },
-    gasIn: parse(form.gasIn), gasOut: parse(form.gasOut), feeInPercent: parse(form.feeInPercent), wearInPercent: parse(form.wearInPercent),
-    feeOutPercent: parse(form.feeOutPercent), wearOutPercent: parse(form.wearOutPercent), feeHaircutPercent: automaticHaircut ? null : parse(form.feeHaircutPercent),
-  };
-  const calculation = calculateLPBreakEven(input);
+  const calculation = calculateLPBreakEven(toCalculatorInput(form, automaticHaircut));
   const result = calculation.ok ? calculation : null;
-  const errors = calculation.ok ? {} : calculation.errors;
-  const update = (key: FieldKey, value: string) => {
+  const errors: Record<string, string> = calculation.ok ? {} : { ...calculation.errors };
+  if (errors.lowerPrice) {
+    delete errors.lowerPrice;
+    errors.downsidePercent = '下跌幅度须大于 0%，且小于 100%。';
+  }
+  if (errors.upperPrice) {
+    delete errors.upperPrice;
+    errors.upsidePercent = '请设置大于 0% 的上涨幅度。';
+  }
+  const update = (key: ParameterKey, value: string) => {
     setIsExample(false);
-    const newPrice = parse(value);
-    const previousPrice = lastValidPrice.current;
-    const priceChanged = key === 'currentPrice' && newPrice > 0 && Number.isFinite(newPrice);
-    if (priceChanged) lastValidPrice.current = newPrice;
-    setForm(previous => {
-      const next = { ...previous, [key]: value };
-      if (priceChanged) {
-        for (const bound of ['lowerPrice', 'upperPrice'] as const) {
-          const boundValue = parse(previous[bound]);
-          if (Number.isFinite(boundValue)) next[bound] = String(boundValue / previousPrice * newPrice);
-        }
-      }
-      return next;
-    });
+    setForm(previous => ({ ...previous, [key]: value }));
   };
-  const field = (key: FieldKey, label: string, suffix: string, options: { hint?: string; hiddenLabel?: boolean; compact?: boolean; disabled?: boolean; value?: string } = {}) =>
-    <Field label={label} value={options.value ?? form[key]} onChange={value => update(key, value)} suffix={suffix} error={errors[key]} {...options} />;
-  const reset = () => { setForm({ ...EXAMPLE }); setMode('bounds'); setAutomaticHaircut(true); setIsExample(true); lastValidPrice.current = parse(EXAMPLE.currentPrice); };
-  const setWidth = (percent: number) => {
-    const current = parse(form.currentPrice);
-    if (!(current > 0 && Number.isFinite(current))) return;
-    setMode('bounds'); setIsExample(false);
-    setForm(previous => ({ ...previous, lowerPrice: String(current * (1 - percent / 100)), upperPrice: String(current * (1 + percent / 100)) }));
+  const slider = (key: ParameterKey, label: string, suffix: string, options: { min?: number; max: number; step: number; hint?: string; compact?: boolean; disabled?: boolean; value?: string }) =>
+    <SliderField label={label} value={options.value ?? form[key]} onChange={value => update(key, value)} suffix={suffix} error={errors[key]} {...options} />;
+  const reset = () => { setForm({ ...EXAMPLE }); setAutomaticHaircut(true); setIsExample(true); };
+  const quickWidth = (width: number) => {
+    setIsExample(false);
+    setForm(previous => ({ ...previous, downsidePercent: String(width), upsidePercent: String(width) }));
   };
-  const switchMode = (next: 'bounds' | 'ratio') => {
-    if (next === mode) return;
-    if (result) setForm(previous => ({ ...previous, tokenPercent: String(result.tokenWeight * 100), upperPrice: String(result.upperPrice) }));
-    setMode(next); setIsExample(false);
-  };
-  const current = parse(form.currentPrice);
-  const rangePosition = result ? (current - result.lowerPrice) / (result.upperPrice - result.lowerPrice) * 100 : 50;
+  const buyPercent = parseParameter(form.entryBuyPercent);
+  const buyValue = parseParameter(form.capital) * buyPercent / 100;
 
   return <div className="app-shell">
     <header className="site-header">
       <a href="#" className="brand" aria-label="LP 包赚计算器首页"><span className="brand-mark"><Icon name="mark" /></span><span>LP<span className="brand-divider">/</span>包赚计算器</span></a>
       <div className="header-context"><span className="status-dot" />本地测算<span className="header-separator">/</span>无需连接钱包</div>
     </header>
-
     <main>
-      <div className="page-heading"><div><h1>这笔 LP，多久回本？</h1><p>把年化、区间和磨损填进去，让手续费把这笔账算清楚。</p></div><a className="text-link" href="#method">计算口径 <Icon name="arrow" /></a></div>
-
-      <div className="mobile-summary" role="status"><span>预计有效做市时间</span><strong>{result ? duration(result.breakEvenHours) : '请补全参数'}</strong></div>
-
+      <div className="page-heading"><div><h1>这笔 LP，多久覆盖成本？</h1><p>调好区间和买币比例，用你当前的年化，把成本算清楚。</p></div><a className="text-link" href="#method">计算口径 <Icon name="arrow" /></a></div>
+      <div className="mobile-summary" role="status"><span>预计有效做市时间</span><strong>{result ? duration(result.breakEvenHours) : '请调整参数'}</strong></div>
       <div className="calculator-layout">
-        <form className="input-panel" onSubmit={event => event.preventDefault()} noValidate>
+        <form className="input-panel slider-panel" onSubmit={event => event.preventDefault()} noValidate>
           <div className="panel-heading"><h2>设置这笔 LP</h2><button className="reset-button" type="button" onClick={reset}><Icon name="reset" />恢复示例</button></div>
-          <div className={`example-note ${isExample ? '' : 'custom-note'}`}><span className="note-dot" />{isExample ? '当前为示例参数，可直接修改' : '自定义参数 · 修改后即时重算'}</div>
+          <div className={`example-note ${isExample ? '' : 'custom-note'}`}><span className="note-dot" />{isExample ? '示例参数 · 拖动滑块，或点数字精确修改' : '即时计算 · 拖动滑块，或点数字精确修改'}</div>
 
           <section className="form-section first-section" aria-labelledby="investment-title">
-            <h3 id="investment-title">投入与收益</h3>
-            <div className="field-grid">
-              {field('capital', '净入池本金', 'USD', { hint: '不含 gas 和开仓换币成本' })}
-              {field('aprPercent', '手续费年化 APR', '%', { hint: '该仓位的预估单利年化' })}
-            </div>
-            <div className="current-price-row">{field('currentPrice', '当前币价', 'USD')}<p className="side-hint">波动币 / 稳定币<br />改现价时保留区间幅度</p></div>
+            <h3 id="investment-title">投入与实时年化</h3>
+            {slider('capital', '净入池本金', 'USD', { min: 100, max: 20000, step: 100, hint: '不含 gas 和本次换币成本' })}
+            <div className="quick-row capital-presets"><span>本金</span>{[1000, 5000, 10000].map(value => <button type="button" aria-pressed={form.capital === String(value)} key={value} onClick={() => update('capital', String(value))}>${amount(value)}</button>)}</div>
+            {slider('aprPercent', '当前区间实时 APR', '%', { max: 20000, step: 100, hint: '直接用你当前仓位的手续费年化，不按区间再调整' })}
+            <div className="quick-row"><span>年化</span>{[1000, 5000, 10000].map(value => <button type="button" aria-pressed={form.aprPercent === String(value)} key={value} onClick={() => update('aprPercent', String(value))}>{amount(value)}%</button>)}</div>
           </section>
 
           <section className="form-section range-section" aria-labelledby="range-title">
-            <div className="section-heading"><h3 id="range-title">价格区间与配比</h3><span className="muted">自动联动</span></div>
-            <div className="segmented-control" role="group" aria-label="区间设置方式">
-              <button type="button" aria-pressed={mode === 'bounds'} onClick={() => switchMode('bounds')}>按价格区间</button>
-              <button type="button" aria-pressed={mode === 'ratio'} onClick={() => switchMode('ratio')}>按目标配比</button>
+            <div className="section-heading"><h3 id="range-title">你的实际区间</h3><span className="muted">只用于计算本金损失</span></div>
+            <div className="relative-range-inputs">
+              {slider('downsidePercent', '允许下跌', '%', { min: 0.1, max: 10, step: 0.1 })}
+              {slider('upsidePercent', '允许上涨', '%', { min: 0.1, max: 10, step: 0.1 })}
             </div>
-            <div className="field-grid range-inputs">
-              {field('lowerPrice', '价格下限', 'USD')}
-              {mode === 'bounds' ? field('upperPrice', '价格上限', 'USD') : field('tokenPercent', '波动币目标占比', '%')}
-            </div>
-            <div className="quick-row"><span>{mode === 'bounds' ? '快捷区间' : '快捷配比'}</span>
-              {mode === 'bounds' ? [1, 2, 5].map(value => <button type="button" key={value} onClick={() => setWidth(value)}>±{value}%</button>)
-                : [30, 50, 70].map(value => <button type="button" key={value} onClick={() => update('tokenPercent', String(value))}>{value}:{100 - value}</button>)}
-            </div>
-            {result && <div className="allocation-preview">
-              <div className="range-scale"><span>{percentage(result.lowerPrice, current)}</span><span>现价</span><span>{percentage(result.upperPrice, current)}</span></div>
-              <div className="range-track"><span className="range-cap left" /><span className="range-cap right" /><span className="current-marker" style={{ left: `${rangePosition}%` }} /></div>
-              <div className="range-prices"><span>{price(result.lowerPrice)}</span><span>{price(result.upperPrice)}</span></div>
-              <div className="allocation-heading"><span>实际入池配比</span><span>按美元价值</span></div>
-              <div className="allocation-track" role="img" aria-label={`波动币 ${amount(result.tokenWeight * 100)}%，稳定币 ${amount((1 - result.tokenWeight) * 100)}%`}><span style={{ transform: `scaleX(${result.tokenWeight})` }} /></div>
-              <div className="allocation-labels"><span><i className="token-dot" />波动币 <b>{amount(result.tokenWeight * 100)}%</b></span><span><i className="stable-dot" />稳定币 <b>{amount((1 - result.tokenWeight) * 100)}%</b></span></div>
-              <div className="allocation-values"><span>{money(result.initialTokenAmount * current)}</span><span>{money(result.initialStableAmount)}</span></div>
+            <div className="quick-row"><span>对称区间</span>{[1, 2, 5, 10].map(value => <button type="button" aria-pressed={form.downsidePercent === String(value) && form.upsidePercent === String(value)} key={value} onClick={() => quickWidth(value)}>±{value}%</button>)}</div>
+            <p className="section-note">上下幅度相对开仓价。实际换了区间，请同步填写新仓位对应的 APR。</p>
+          </section>
+
+          <section className="form-section buy-section" aria-labelledby="buy-title">
+            <div className="section-heading"><h3 id="buy-title">开仓配平</h3><span className="muted">这次要买多少币</span></div>
+            {slider('entryBuyPercent', '开仓买币比例', '%', { max: 100, step: 1 })}
+            <div className="quick-row ratio-presets"><span>买币 : 其余</span>{[[10, '1:9'], [30, '3:7'], [50, '1:1'], [70, '7:3']].map(([value, label]) => <button type="button" aria-pressed={form.entryBuyPercent === String(value)} key={label} onClick={() => update('entryBuyPercent', String(value))}>{label}</button>)}</div>
+            {Number.isFinite(buyValue) && buyPercent >= 0 && buyPercent <= 100 && buyValue >= 0 && <div className="buy-budget">
+              <div><span>本次买币目标</span><strong>{money(buyValue)}</strong><small>本金的 {amount(buyPercent)}%</small></div>
+              {result && <><Icon name="arrow" /><div><span>含损耗预计花费</span><strong>{money(result.entrySpend)}</strong><small>其中损耗 {money(result.entrySwapLoss)}</small></div></>}
             </div>}
-            <p className="section-note">配比随区间确定；缩窄区间不会自动提高 APR。</p>
+            <p className="section-note">比例只计算本次换币金额与磨损；其余资产视为已就绪。LP 本金损失仍按实际区间计算。</p>
           </section>
 
           <section className="form-section cost-section" aria-labelledby="cost-title">
-            <div className="section-heading"><h3 id="cost-title">进出场成本</h3><span className="muted">按实际换币金额</span></div>
-            <div className="cost-grid"><span /><span className="cost-column-label">进场</span><span className="cost-column-label">退出</span>
-              <div className="cost-row-label">Gas<span>全流程合计</span></div>
-              {field('gasIn', '进场总 gas', 'USD', { hiddenLabel: true, compact: true })}{field('gasOut', '退出总 gas', 'USD', { hiddenLabel: true, compact: true })}
-              <div className="cost-row-label">兑换费率</div>
-              {field('feeInPercent', '进场兑换手续费率', '%', { hiddenLabel: true, compact: true })}{field('feeOutPercent', '退出兑换手续费率', '%', { hiddenLabel: true, compact: true })}
-              <div className="cost-row-label">成交磨损<span>滑点及价格冲击</span></div>
-              {field('wearInPercent', '进场预估成交磨损率', '%', { hiddenLabel: true, compact: true })}{field('wearOutPercent', '退出预估成交磨损率', '%', { hiddenLabel: true, compact: true })}
+            <div className="section-heading"><h3 id="cost-title">进出场成本</h3><span className="muted">兑换费与磨损分别计入</span></div>
+            <div className="cost-slider-columns">
+              <div className="cost-slider-column"><h4>进场</h4>
+                {slider('gasIn', '进场 Gas', 'USD', { max: 20, step: 0.1, compact: true })}
+                {slider('feeInPercent', '进场兑换费率', '%', { max: 1, step: 0.01, compact: true })}
+                {slider('wearInPercent', '进场成交磨损', '%', { max: 3, step: 0.01, compact: true })}
+              </div>
+              <div className="cost-slider-column"><h4>退出</h4>
+                {slider('gasOut', '退出 Gas', 'USD', { max: 20, step: 0.1, compact: true })}
+                {slider('feeOutPercent', '退出兑换费率', '%', { max: 1, step: 0.01, compact: true })}
+                {slider('wearOutPercent', '退出成交磨损', '%', { max: 3, step: 0.01, compact: true })}
+              </div>
             </div>
-            <p className="section-note">填写预估实际损失，不是钱包的滑点容忍度。</p>
+            <p className="section-note">Gas 是各阶段总成本；成交磨损是预估滑点及价格冲击，不是滑点容忍度。</p>
           </section>
 
           <details className="advanced-settings"><summary><span>高级设置</span><span className="summary-detail">手续费兑现损耗<Icon name="chevron" /></span></summary><div className="advanced-body">
@@ -259,33 +237,33 @@ export default function App() {
               setAutomaticHaircut(event.target.checked); setIsExample(false);
               if (result) setForm(previous => ({ ...previous, feeHaircutPercent: String(result.feeHaircutPercent) }));
             }} />跟随退出兑换费率与成交磨损</label>
-            {field('feeHaircutPercent', '手续费兑现损耗率', '%', { disabled: automaticHaircut, value: automaticHaircut && result ? String(Number(result.feeHaircutPercent.toFixed(6))) : form.feeHaircutPercent })}
-            <p className="section-note">默认按全部手续费都需要换币保守估算。仅减少手续费净收入，不重复计入本金成本；不模拟手续费币的持有价格变化。</p>
+            {slider('feeHaircutPercent', '手续费兑现损耗', '%', { max: 5, step: 0.01, disabled: automaticHaircut, value: automaticHaircut && result ? String(Number(result.feeHaircutPercent.toFixed(6))) : form.feeHaircutPercent })}
+            <p className="section-note">默认按全部手续费需要换币估算。仅减少手续费净收入，不重复计入本金成本。</p>
           </div></details>
         </form>
 
         <div className="results-column">
           {result ? <>
             <section className="result-panel" aria-labelledby="result-title">
-              <div className="result-topline"><h2 id="result-title">预计回本时间</h2><span className="scenario-badge">区间内最不利退出</span></div>
+              <div className="result-topline"><h2 id="result-title">预计成本覆盖时间</h2><span className="scenario-badge">按美元本金不亏计算</span></div>
               <div className={`result-time ${result.breakEvenHours === null ? 'result-unavailable' : ''}`} role="status" aria-live="polite" aria-atomic="true">
                 {result.breakEvenHours !== null && <span className="approx-label">约</span>}<TimeValue hours={result.breakEvenHours} />
               </div>
-              <p className="result-explanation">{result.breakEvenHours === null ? '每小时净手续费为 0，无法覆盖当前成本。请检查 APR 或手续费兑现损耗。' : <>累计有效做市后，即使按下沿 <strong>{price(result.lowerPrice)}</strong> 退出，<br className="desktop-break" />预估手续费也能覆盖本金损失与进出场成本。</>}</p>
+              <p className="result-explanation">{result.breakEvenHours === null ? '每小时净手续费为 0，无法覆盖当前成本。请检查 APR 或手续费兑现损耗。' : <>累计有效做市后，即使币价下跌 <strong>{amount((1 - result.lowerPrice) * 100)}%</strong> 到区间下沿，<br className="desktop-break" />预估手续费也能覆盖本金损失与进出场成本。</>}</p>
               <div className="result-metrics"><div><span>每小时净手续费</span><strong>{money(result.netHourlyFee)}<small>/ 小时</small></strong></div><div><span>共需覆盖</span><strong>{money(result.requiredFees)}</strong></div></div>
               <FeeChart result={result} />
-              <div className="condition-note"><Icon name="info" /><p>以所填费收和成本实现、退出价格仍在区间内为前提。出区间期间不赚手续费；该时间不代表多久会触边。</p></div>
+              <div className="condition-note"><Icon name="info" /><p>按当前实时 APR 持续、成本符合估计且退出价格仍在区间内测算。出区间不累计手续费；该时间不代表多久会触边。</p></div>
             </section>
             <div className="detail-panel"><Ledger result={result} /><ScenarioTable result={result} /></div>
           </> : <section className="result-panel invalid-panel" role="status" aria-live="polite">
-            <span className="invalid-symbol"><Icon name="info" /></span><h2>补全参数，就能算回本时间</h2><p>请调整左侧标出的项目，结果会自动更新。</p><ul>{Object.entries(errors).map(([key, message]) => <li key={key}>{message}</li>)}</ul>
+            <span className="invalid-symbol"><Icon name="info" /></span><h2>调整参数，就能算成本覆盖时间</h2><p>拖动滑块，或点数字修正标出的项目，结果会自动更新。</p><ul>{Object.entries(errors).map(([key, message]) => <li key={key}>{message}</li>)}</ul>
           </section>}
         </div>
       </div>
 
       <details className="method-panel" id="method"><summary><span><Icon name="info" />这笔账怎么算</span><span>公式与适用范围<Icon name="chevron" /></span></summary><div className="method-content">
-        <div><h3>回本时间 = 待覆盖金额 ÷ 每小时净手续费</h3><p>每小时净手续费 = 净入池本金 × APR ÷ 100 ÷ 8760 ×（1 − 手续费兑现损耗率）。待覆盖金额 = LP 本金损失 + 开仓换币损耗 + 退出换币损耗 + 双程 gas，最低按 0 计。</p><p>本金按 Uniswap V3 集中流动性公式估值，随价格计算两币数量。配比变化造成的损失已包含在仓位价值里，不再扣一遍“无常损失”。</p></div>
-        <div><h3>这是条件测算，不是收益预测</h3><p>默认全稳定币进场、退出全部换回稳定币，稳定币按 1 美元估值。APR 为该仓位预估的手续费单利年化，按退出时美元等值估计；不含激励、不复投、不代表未来费收。</p><p>采用理论连续价格区间，不计算 tick 落点。低于下限仍可能继续亏损，超出本页“区间内最不利情况”的边界。</p><a className="text-link" href="https://app.uniswap.org/whitepaper-v3.pdf" target="_blank" rel="noreferrer">查看 Uniswap V3 公式来源<Icon name="external" /></a></div>
+        <div><h3>年化算收入，区间算本金损失，配平算开仓成本</h3><p>直接使用你当前仓位、当前区间的实时手续费 APR。每小时净手续费 = 本金 × APR ÷ 100 ÷ 8760 ×（1 − 手续费兑现损耗率），不再按区间宽度或配比调整年化。</p><p>买币比例是本次要计入兑换成本的净金额占本金的比例。1:9 对应 10%；5000 美元本金即需买到价值 500 美元的币，实际支出另加兑换损耗。它不用于反算区间或决定 LP 库存。</p></div>
+        <div><h3>这是条件测算，不是收益预测</h3><p>LP 数量变化按 Uniswap V3 曲线与实际涨跌区间计算，区间内最不利退出点是下沿；损失中已包含配比变化，不再额外扣一次无常损失。本金含已持资产的开仓时价值，历史买入成本不计入。</p><p>稳定币按一美元估值，退出全部换回稳定币。手续费按退出时美元等值估计，不复投、不含激励、不模拟持有价格变化。采用理论连续区间；出区间和进一步下跌不属于“区间内回本”条件。</p><a className="text-link" href="https://app.uniswap.org/whitepaper-v3.pdf" target="_blank" rel="noreferrer">查看 Uniswap V3 公式来源<Icon name="external" /></a></div>
       </div></details>
     </main>
     <footer className="site-footer"><span>LP「包赚」计算器</span><span>算清成本，再看年化。</span><span>本地计算 · 不读取钱包</span></footer>

@@ -4,7 +4,7 @@ import { calculateLPBreakEven, positionAtPrice, solveUpperPrice } from '../src/l
 import type { CalculatorInput, CalculationSuccess } from '../src/lib/calculator.ts';
 
 const base: CalculatorInput = {
-  capital: 5000, aprPercent: 5000, currentPrice: 100,
+  capital: 5000, aprPercent: 5000, currentPrice: 100, entryBuyPercent: 50,
   range: { mode: 'bounds', lowerPrice: 98, upperPrice: 102 },
   gasIn: 0, gasOut: 0, feeInPercent: 0, wearInPercent: 0,
   feeOutPercent: 0, wearOutPercent: 0, feeHaircutPercent: null,
@@ -24,6 +24,9 @@ test('reproduces the screenshot using actual concentrated liquidity inventory', 
   near(r.netHourlyFee, 28.538812785388128);
   near(r.scenarios.lower.grossValue, 4925.121246341572);
   near(r.scenarios.lower.capitalLoss, 74.878753658428);
+  near(r.scenarios.lower.marketLoss, 49.50246274410478);
+  near(r.scenarios.lower.impermanentLoss, 25.376290914323);
+  near(r.scenarios.lower.marketLoss + r.scenarios.lower.impermanentLoss, r.scenarios.lower.capitalLoss);
   near(r.breakEvenHours!, 2.623751528191308);
 });
 
@@ -36,14 +39,14 @@ test('reproduces the one percent range example without changing APR implicitly',
 
 test('grosses up entry conversion and charges outgoing conversion only once', () => {
   const r = calculate({ gasIn: 2, gasOut: 2, feeInPercent: 0.3, feeOutPercent: 0.3, wearInPercent: 0.1, wearOutPercent: 0.1 });
-  near(r.entrySwapLoss, 9.932768454923917);
+  near(r.entrySwapLoss, 10.0326003034, 1e-8);
   near(r.scenarios.lower.exitSwapLoss, 19.685709621627403);
-  near(r.requiredFees, 108.49723173497932);
+  near(r.requiredFees, 108.5970635834, 1e-8);
   near(r.netHourlyFee, 28.424743150684932);
-  near(r.breakEvenHours!, 3.816999547183769);
+  near(r.breakEvenHours!, 3.8205116932, 1e-8);
   near(r.entrySwapFee + r.entryExecutionWear, r.entrySwapLoss);
   near(r.scenarios.lower.exitSwapFee + r.scenarios.lower.exitExecutionWear, r.scenarios.lower.exitSwapLoss);
-  near(r.totalFundsRequired, 5013.932768454924);
+  near(r.totalFundsRequired, 5014.0326003034, 1e-8);
 });
 
 test('conserves capital at the initial price', () => {
@@ -123,6 +126,29 @@ test('APR stays constant when the range changes', () => {
   near(calculate({ range: { mode: 'bounds', lowerPrice: 99, upperPrice: 101 } }).netHourlyFee, calculate().netHourlyFee);
 });
 
+test('one-to-nine means buying ten percent and affects entry costs only', () => {
+  const costs = { gasIn: 2, gasOut: 2, feeInPercent: 0.3, feeOutPercent: 0.3, wearInPercent: 0.1, wearOutPercent: 0.1 };
+  const r = calculate({ ...costs, entryBuyPercent: 10 });
+  const half = calculate({ ...costs, entryBuyPercent: 50 });
+  near(r.entryBuyValue, 500);
+  near(r.entrySpend, 502.0065200607);
+  near(r.entrySwapLoss, 2.0065200607);
+  near(r.requiredFees, 100.5709833407);
+  near(r.breakEvenHours!, 3.53814923877);
+  near(half.entrySwapLoss, r.entrySwapLoss * 5);
+  near(r.scenarios.lower.capitalLoss, half.scenarios.lower.capitalLoss);
+  near(r.scenarios.lower.exitSwapLoss, half.scenarios.lower.exitSwapLoss);
+  near(r.netHourlyFee, half.netHourlyFee);
+  near(r.tokenWeight, half.tokenWeight);
+});
+
+test('zero new buys have no entry conversion costs, even when fee rates are set', () => {
+  const r = calculate({ entryBuyPercent: 0, feeInPercent: 1, wearInPercent: 1 });
+  near(r.entryBuyValue, 0);
+  near(r.entrySwapLoss, 0);
+  near(r.entrySpend, 0);
+});
+
 test('handles narrow ranges and different token price scales', () => {
   for (const p of [1e-10, 1, 1e10]) {
     const r = calculate({ currentPrice: p, range: { mode: 'bounds', lowerPrice: p * 0.99999999, upperPrice: p * 1.00000001 } });
@@ -138,6 +164,7 @@ test('rejects missing, negative, nonfinite and invalid rate inputs', () => {
   for (const patch of [
     { capital: NaN }, { capital: 0 }, { currentPrice: Infinity }, { gasIn: -1 },
     { aprPercent: -1 }, { feeInPercent: 100 }, { wearInPercent: 100 },
+    { entryBuyPercent: -1 }, { entryBuyPercent: 101 }, { entryBuyPercent: NaN },
     { feeOutPercent: 101 }, { feeHaircutPercent: -1 },
     { range: { mode: 'bounds' as const, lowerPrice: 100, upperPrice: 102 } },
     { range: { mode: 'bounds' as const, lowerPrice: 98, upperPrice: 99 } },

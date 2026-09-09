@@ -37,5 +37,5 @@ export function durationParts(hours: number): { value: string; unit: string }[] 
 }
 
 export function duration(hours: number | null): string {
-  return hours === null ? '无法回本' : durationParts(hours).map(part => `${part.value} ${part.unit}`).join(' ');
+  return hours === null ? '无法覆盖' : durationParts(hours).map(part => `${part.value} ${part.unit}`).join(' ');
 }
