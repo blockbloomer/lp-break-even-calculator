@@ -6,8 +6,8 @@ import type { CalculatorInput, CalculationSuccess } from '../src/lib/calculator.
 const base: CalculatorInput = {
   capital: 5000, aprPercent: 5000, currentPrice: 100, entryBuyPercent: 50,
   range: { mode: 'bounds', lowerPrice: 98, upperPrice: 102 },
-  gasIn: 0, gasOut: 0, feeInPercent: 0, wearInPercent: 0,
-  feeOutPercent: 0, wearOutPercent: 0, feeHaircutPercent: null,
+  gasIn: 0, gasOut: 0, tradeWearInPercent: 0,
+  tradeWearOutPercent: 0, feeHaircutPercent: null,
 };
 const near = (actual: number, expected: number, tolerance = 1e-8) => {
   assert.ok(Math.abs(actual - expected) <= tolerance, `${actual} ≉ ${expected}`);
@@ -38,14 +38,14 @@ test('reproduces the one percent range example without changing APR implicitly',
 });
 
 test('grosses up entry conversion and charges outgoing conversion only once', () => {
-  const r = calculate({ gasIn: 2, gasOut: 2, feeInPercent: 0.3, feeOutPercent: 0.3, wearInPercent: 0.1, wearOutPercent: 0.1 });
+  const r = calculate({ gasIn: 2, gasOut: 2, tradeWearInPercent: 0.3997, tradeWearOutPercent: 0.3997 });
   near(r.entrySwapLoss, 10.0326003034, 1e-8);
   near(r.scenarios.lower.exitSwapLoss, 19.685709621627403);
   near(r.requiredFees, 108.5970635834, 1e-8);
   near(r.netHourlyFee, 28.424743150684932);
   near(r.breakEvenHours!, 3.8205116932, 1e-8);
-  near(r.entrySwapFee + r.entryExecutionWear, r.entrySwapLoss);
-  near(r.scenarios.lower.exitSwapFee + r.scenarios.lower.exitExecutionWear, r.scenarios.lower.exitSwapLoss);
+  near(r.entrySpend - r.entrySwapLoss, r.entryBuyValue);
+  near(r.scenarios.lower.grossValue - r.scenarios.lower.exitSwapLoss, r.scenarios.lower.exitNetValue);
   near(r.totalFundsRequired, 5014.0326003034, 1e-8);
 });
 
@@ -74,13 +74,13 @@ test('ratio solver round trips multiple allocations and rejects an impossible up
 });
 
 test('lower bound is the worst stablecoin exit value, with or without fees', () => {
-  for (const feeOutPercent of [0, 0.3, 90, 100]) {
-    const r = calculate({ feeOutPercent });
+  for (const tradeWearOutPercent of [0, 0.3, 90, 100]) {
+    const r = calculate({ tradeWearOutPercent });
     let previous = -Infinity;
     for (let i = 0; i <= 20; i++) {
       const p = 98 + i / 5;
       const amount = positionAtPrice(r.position, p);
-      const value = amount.tokenAmount * p * (1 - feeOutPercent / 100) + amount.stableAmount;
+      const value = amount.tokenAmount * p * (1 - tradeWearOutPercent / 100) + amount.stableAmount;
       assert.ok(value >= previous - 1e-8);
       previous = value;
     }
@@ -112,9 +112,32 @@ test('100 percent fee cashout loss is a valid zero revenue scenario', () => {
 });
 
 test('automatic cashout loss tracks outgoing settings and custom loss overrides it', () => {
-  const patch = { feeOutPercent: 1, wearOutPercent: 2 };
-  near(calculate(patch).feeHaircutPercent, 2.98);
+  const patch = { tradeWearInPercent: 1, tradeWearOutPercent: 0.4 };
+  assert.equal(calculate(patch).feeHaircutPercent, 0.4);
   near(calculate({ ...patch, feeHaircutPercent: 0 }).netHourlyFee, calculate().netHourlyFee);
+});
+
+test('independent entry and exit wear rates apply once to the corresponding traded value', () => {
+  const r = calculate({ tradeWearInPercent: 1, tradeWearOutPercent: 2 });
+  near(r.entrySpend, 2500 / 0.99);
+  near(r.entrySwapLoss, r.entrySpend * 0.01);
+  for (const scenario of Object.values(r.scenarios)) {
+    near(scenario.exitSwapLoss, scenario.tokenAmount * scenario.price * 0.02);
+    near(scenario.exitNetValue, scenario.grossValue - scenario.exitSwapLoss);
+    near(scenario.totalGap, 5000 + r.entrySwapLoss - scenario.exitNetValue);
+  }
+  assert.equal(r.scenarios.upper.exitSwapLoss, 0);
+  assert.equal(r.feeHaircutPercent, 2);
+  near(r.netHourlyFee, r.grossHourlyFee * 0.98);
+});
+
+test('100 percent exit wear consumes only sold tokens and makes automatic revenue zero', () => {
+  const r = calculate({ tradeWearOutPercent: 100 });
+  assert.equal(r.scenarios.lower.exitNetValue, 0);
+  assert.equal(r.scenarios.current.exitNetValue, r.initialStableAmount);
+  assert.equal(r.scenarios.upper.exitNetValue, r.scenarios.upper.stableAmount);
+  assert.equal(r.netHourlyFee, 0);
+  assert.equal(r.breakEvenHours, null);
 });
 
 test('capital scaling cancels without gas; fixed gas penalizes smaller positions', () => {
@@ -136,7 +159,7 @@ test('accepts APR up to 100,000 percent and rejects values above the ceiling', (
 });
 
 test('one-to-nine means buying ten percent and affects entry costs only', () => {
-  const costs = { gasIn: 2, gasOut: 2, feeInPercent: 0.3, feeOutPercent: 0.3, wearInPercent: 0.1, wearOutPercent: 0.1 };
+  const costs = { gasIn: 2, gasOut: 2, tradeWearInPercent: 0.3997, tradeWearOutPercent: 0.3997 };
   const r = calculate({ ...costs, entryBuyPercent: 10 });
   const half = calculate({ ...costs, entryBuyPercent: 50 });
   near(r.entryBuyValue, 500);
@@ -152,7 +175,7 @@ test('one-to-nine means buying ten percent and affects entry costs only', () => 
 });
 
 test('zero new buys have no entry conversion costs, even when fee rates are set', () => {
-  const r = calculate({ entryBuyPercent: 0, feeInPercent: 1, wearInPercent: 1 });
+  const r = calculate({ entryBuyPercent: 0, tradeWearInPercent: 1 });
   near(r.entryBuyValue, 0);
   near(r.entrySwapLoss, 0);
   near(r.entrySpend, 0);
@@ -172,9 +195,11 @@ test('handles narrow ranges and different token price scales', () => {
 test('rejects missing, negative, nonfinite and invalid rate inputs', () => {
   for (const patch of [
     { capital: NaN }, { capital: 0 }, { currentPrice: Infinity }, { gasIn: -1 },
-    { aprPercent: -1 }, { feeInPercent: 100 }, { wearInPercent: 100 },
+    { aprPercent: -1 }, { tradeWearInPercent: 100 }, { tradeWearInPercent: -1 },
+    { tradeWearInPercent: NaN }, { tradeWearOutPercent: NaN },
+    { tradeWearInPercent: undefined as unknown as number }, { tradeWearOutPercent: undefined as unknown as number },
     { entryBuyPercent: -1 }, { entryBuyPercent: 101 }, { entryBuyPercent: NaN },
-    { feeOutPercent: 101 }, { feeHaircutPercent: -1 },
+    { tradeWearOutPercent: 101 }, { tradeWearOutPercent: -1 }, { feeHaircutPercent: -1 },
     { range: { mode: 'bounds' as const, lowerPrice: 100, upperPrice: 102 } },
     { range: { mode: 'bounds' as const, lowerPrice: 98, upperPrice: 99 } },
     { range: { mode: 'ratio' as const, lowerPrice: 98, tokenPercent: 100 } },

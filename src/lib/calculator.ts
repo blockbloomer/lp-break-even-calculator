@@ -14,11 +14,10 @@ export interface CalculatorInput {
   range: RangeInput;
   gasIn: number;
   gasOut: number;
-  feeInPercent: number;
-  wearInPercent: number;
-  feeOutPercent: number;
-  wearOutPercent: number;
-  /** Null links this estimate to the combined outgoing conversion loss. */
+  /** Total expected transaction loss, including exchange fees, slippage and price impact. */
+  tradeWearInPercent: number;
+  tradeWearOutPercent: number;
+  /** Null links this estimate directly to outgoing transaction wear. */
   feeHaircutPercent: number | null;
 }
 
@@ -43,8 +42,6 @@ export interface ExitScenario extends PositionAmounts {
   holdingValue: number;
   marketLoss: number;
   impermanentLoss: number;
-  exitSwapFee: number;
-  exitExecutionWear: number;
   exitSwapLoss: number;
   exitNetValue: number;
   totalGap: number;
@@ -60,8 +57,6 @@ export interface CalculationSuccess {
   tokenWeight: number;
   initialTokenAmount: number;
   initialStableAmount: number;
-  entrySwapFee: number;
-  entryExecutionWear: number;
   entrySwapLoss: number;
   entryBuyValue: number;
   entrySpend: number;
@@ -156,10 +151,8 @@ export function calculateLPBreakEven(input: CalculatorInput): CalculationSuccess
   percent('entryBuyPercent', input.entryBuyPercent, '开仓买币比例');
   nonnegative('gasIn', input.gasIn, '进场 gas');
   nonnegative('gasOut', input.gasOut, '退出 gas');
-  percent('feeInPercent', input.feeInPercent, '进场兑换费', false);
-  percent('wearInPercent', input.wearInPercent, '进场成交磨损', false);
-  percent('feeOutPercent', input.feeOutPercent, '退出兑换费');
-  percent('wearOutPercent', input.wearOutPercent, '退出成交磨损');
+  percent('tradeWearInPercent', input.tradeWearInPercent, '进场交易磨损', false);
+  percent('tradeWearOutPercent', input.tradeWearOutPercent, '退出交易磨损');
   if (input.feeHaircutPercent !== null) percent('feeHaircutPercent', input.feeHaircutPercent, '手续费兑现损耗');
   if (input.range.lowerPrice >= input.currentPrice) errors.lowerPrice = '价格下限须低于当前币价。';
 
@@ -181,30 +174,26 @@ export function calculateLPBreakEven(input: CalculatorInput): CalculationSuccess
   const position = createPosition(input.capital, input.currentPrice, input.range.lowerPrice, upperPrice);
   const initial = positionAtPrice(position, input.currentPrice);
   const entryTokenValue = input.capital * input.entryBuyPercent / 100;
-  const inputKeep = (1 - input.feeInPercent / 100) * (1 - input.wearInPercent / 100);
-  const outputKeep = (1 - input.feeOutPercent / 100) * (1 - input.wearOutPercent / 100);
+  const inputKeep = 1 - input.tradeWearInPercent / 100;
+  const outputKeep = 1 - input.tradeWearOutPercent / 100;
   const entrySpend = entryTokenValue / inputKeep;
-  const entrySwapFee = entrySpend * input.feeInPercent / 100;
-  const entryExecutionWear = (entrySpend - entrySwapFee) * input.wearInPercent / 100;
-  const entrySwapLoss = entrySwapFee + entryExecutionWear;
+  const entrySwapLoss = entrySpend * input.tradeWearInPercent / 100;
   const totalGas = input.gasIn + input.gasOut;
-  const feeHaircutPercent = input.feeHaircutPercent ?? (1 - outputKeep) * 100;
+  const feeHaircutPercent = input.feeHaircutPercent ?? input.tradeWearOutPercent;
   const grossHourlyFee = (input.capital / 8760) * (input.aprPercent / 100);
   const netHourlyFee = grossHourlyFee * (1 - feeHaircutPercent / 100);
 
   const scenario = (price: number): ExitScenario => {
     const amounts = positionAtPrice(position, price);
     const tokenValue = amounts.tokenAmount * price;
-    const exitSwapFee = tokenValue * input.feeOutPercent / 100;
-    const exitExecutionWear = (tokenValue - exitSwapFee) * input.wearOutPercent / 100;
-    const exitSwapLoss = exitSwapFee + exitExecutionWear;
+    const exitSwapLoss = tokenValue * input.tradeWearOutPercent / 100;
     const capitalLoss = input.capital - amounts.grossValue;
     const holdingValue = price === input.currentPrice ? input.capital : initial.tokenAmount * price + initial.stableAmount;
     const marketLoss = input.capital - holdingValue;
     const impermanentLoss = holdingValue - amounts.grossValue;
     const totalGap = capitalLoss + entrySwapLoss + totalGas + exitSwapLoss;
     return {
-      ...amounts, price, capitalLoss, holdingValue, marketLoss, impermanentLoss, exitSwapFee, exitExecutionWear, exitSwapLoss,
+      ...amounts, price, capitalLoss, holdingValue, marketLoss, impermanentLoss, exitSwapLoss,
       exitNetValue: tokenValue * outputKeep + amounts.stableAmount,
       totalGap, requiredFees: Math.max(0, totalGap), breakEvenHours: hoursToCover(totalGap, netHourlyFee),
     };
@@ -213,14 +202,14 @@ export function calculateLPBreakEven(input: CalculatorInput): CalculationSuccess
   const result: CalculationSuccess = {
     ok: true, position, lowerPrice: input.range.lowerPrice, upperPrice,
     tokenWeight: position.tokenWeight, initialTokenAmount: initial.tokenAmount, initialStableAmount: initial.stableAmount,
-    entrySwapFee, entryExecutionWear, entrySwapLoss, entryBuyValue: entryTokenValue, entrySpend, totalGas,
+    entrySwapLoss, entryBuyValue: entryTokenValue, entrySpend, totalGas,
     totalFundsRequired: input.capital + entrySwapLoss + totalGas,
     grossHourlyFee, netHourlyFee, feeHaircutPercent, requiredFees: scenarios.lower.requiredFees,
     breakEvenHours: scenarios.lower.breakEvenHours, scenarios,
   };
   const numericValues = [
     position.normalizedLiquidity, position.tokenWeight, result.initialTokenAmount, result.initialStableAmount,
-    entrySwapFee, entryExecutionWear, result.totalFundsRequired, grossHourlyFee, netHourlyFee,
+    entrySpend, entrySwapLoss, result.totalFundsRequired, grossHourlyFee, netHourlyFee,
     ...Object.values(scenarios).flatMap(s => Object.values(s).filter((v): v is number => typeof v === 'number')),
   ];
   if (!numericValues.every(Number.isFinite)) {

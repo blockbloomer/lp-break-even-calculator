@@ -121,12 +121,12 @@ function Ledger({ result }: { result: CalculationSuccess }) {
     <div className="section-heading"><h3>这笔账，要覆盖什么</h3><span className="muted">下沿退出</span></div>
     <dl className="ledger">
       <div><dt><span className="ledger-dot price-dot" />美元本金损失<span className="ledger-detail">币价下跌 {money(s.marketLoss)} + 无常损失 {money(s.impermanentLoss)}</span></dt><dd>{money(s.capitalLoss)}</dd></div>
-      <div><dt><span className="ledger-dot" />开仓换币损耗<span className="ledger-detail">买币目标 {money(result.entryBuyValue)}；兑换费 {money(result.entrySwapFee)} + 磨损 {money(result.entryExecutionWear)}</span></dt><dd>{money(result.entrySwapLoss)}</dd></div>
-      <div><dt><span className="ledger-dot" />退出换币损耗<span className="ledger-detail">兑换费 {money(s.exitSwapFee)} · 成交磨损 {money(s.exitExecutionWear)}</span></dt><dd>{money(s.exitSwapLoss)}</dd></div>
+      <div><dt><span className="ledger-dot" />进场交易磨损<span className="ledger-detail">买币目标 {money(result.entryBuyValue)}；含磨损支出 {money(result.entrySpend)}</span></dt><dd>{money(result.entrySwapLoss)}</dd></div>
+      <div><dt><span className="ledger-dot" />退出交易磨损<span className="ledger-detail">按退出时需要卖出的币计算</span></dt><dd>{money(s.exitSwapLoss)}</dd></div>
       <div><dt><span className="ledger-dot gas-dot" />进出场 Gas</dt><dd>{money(result.totalGas)}</dd></div>
       <div className="ledger-total"><dt>共需手续费覆盖</dt><dd>{money(result.requiredFees)}</dd></div>
     </dl>
-    <div className="funds-note"><span>总资金需求（含退出 gas 预留）</span><strong>{money(result.totalFundsRequired)}</strong><p>净入池本金 + 开仓换币损耗 + 双程 gas 预留</p></div>
+    <div className="funds-note"><span>总资金需求（含退出 gas 预留）</span><strong>{money(result.totalFundsRequired)}</strong><p>净入池本金 + 进场交易磨损 + 双程 gas 预留</p></div>
   </section>;
 }
 
@@ -216,28 +216,26 @@ export default function App() {
           </section>
 
           <section className="form-section cost-section" aria-labelledby="cost-title">
-            <div className="section-heading"><h3 id="cost-title">进出场成本</h3><span className="muted">兑换费与磨损分别计入</span></div>
+            <div className="section-heading"><h3 id="cost-title">进出场成本</h3><span className="muted">Gas + 交易磨损</span></div>
             <div className="cost-slider-columns">
               <div className="cost-slider-column"><h4>进场</h4>
                 {slider('gasIn', '进场 Gas', 'USD', { max: 20, step: 0.1, compact: true })}
-                {slider('feeInPercent', '进场兑换费率', '%', { max: 1, step: 0.01, compact: true })}
-                {slider('wearInPercent', '进场成交磨损', '%', { max: 3, step: 0.01, compact: true })}
+                {slider('tradeWearInPercent', '进场交易磨损', '%', { max: 3, step: 0.01, compact: true })}
               </div>
               <div className="cost-slider-column"><h4>退出</h4>
                 {slider('gasOut', '退出 Gas', 'USD', { max: 20, step: 0.1, compact: true })}
-                {slider('feeOutPercent', '退出兑换费率', '%', { max: 1, step: 0.01, compact: true })}
-                {slider('wearOutPercent', '退出成交磨损', '%', { max: 3, step: 0.01, compact: true })}
+                {slider('tradeWearOutPercent', '退出交易磨损', '%', { max: 3, step: 0.01, compact: true })}
               </div>
             </div>
-            <p className="section-note">Gas 是各阶段总成本；成交磨损是预估滑点及价格冲击，不是滑点容忍度。</p>
+            <p className="section-note">交易磨损包含兑换手续费、实际滑点和价格冲击，填一个总损耗率；Gas 单独计算。</p>
           </section>
 
           <details className="advanced-settings"><summary><span>高级设置</span><span className="summary-detail">手续费兑现损耗<Icon name="chevron" /></span></summary><div className="advanced-body">
             <label className="checkbox-label"><input type="checkbox" checked={automaticHaircut} onChange={event => {
               setAutomaticHaircut(event.target.checked); setIsExample(false);
-              if (result) setForm(previous => ({ ...previous, feeHaircutPercent: String(result.feeHaircutPercent) }));
-            }} />跟随退出兑换费率与成交磨损</label>
-            {slider('feeHaircutPercent', '手续费兑现损耗', '%', { max: 5, step: 0.01, disabled: automaticHaircut, value: automaticHaircut && result ? String(Number(result.feeHaircutPercent.toFixed(6))) : form.feeHaircutPercent })}
+              if (!event.target.checked) setForm(previous => ({ ...previous, feeHaircutPercent: previous.tradeWearOutPercent }));
+            }} />跟随退出交易磨损</label>
+            {slider('feeHaircutPercent', '手续费兑现损耗', '%', { max: 5, step: 0.01, disabled: automaticHaircut, value: automaticHaircut ? form.tradeWearOutPercent : form.feeHaircutPercent })}
             <p className="section-note">默认按全部手续费需要换币估算。仅减少手续费净收入，不重复计入本金成本。</p>
           </div></details>
         </form>

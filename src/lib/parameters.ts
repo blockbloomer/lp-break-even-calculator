@@ -2,7 +2,7 @@ import type { CalculatorInput } from './calculator.ts';
 
 export const EXAMPLE = {
   capital: '5000', aprPercent: '5000', downsidePercent: '2', upsidePercent: '2', entryBuyPercent: '50',
-  gasIn: '2', gasOut: '2', feeInPercent: '0.3', wearInPercent: '0.1', feeOutPercent: '0.3', wearOutPercent: '0.1', feeHaircutPercent: '0.3997',
+  gasIn: '2', gasOut: '2', tradeWearInPercent: '0.4', tradeWearOutPercent: '0.4', feeHaircutPercent: '0.4',
 };
 export type ParameterKey = keyof typeof EXAMPLE;
 export type Parameters = Record<ParameterKey, string>;
@@ -16,8 +16,7 @@ export function toCalculatorInput(parameters: Parameters, automaticHaircut: bool
     entryBuyPercent: parseParameter(parameters.entryBuyPercent), currentPrice: 1,
     range: { mode: 'bounds', lowerPrice: 1 - parseParameter(parameters.downsidePercent) / 100, upperPrice: 1 + parseParameter(parameters.upsidePercent) / 100 },
     gasIn: parseParameter(parameters.gasIn), gasOut: parseParameter(parameters.gasOut),
-    feeInPercent: parseParameter(parameters.feeInPercent), wearInPercent: parseParameter(parameters.wearInPercent),
-    feeOutPercent: parseParameter(parameters.feeOutPercent), wearOutPercent: parseParameter(parameters.wearOutPercent),
+    tradeWearInPercent: parseParameter(parameters.tradeWearInPercent), tradeWearOutPercent: parseParameter(parameters.tradeWearOutPercent),
     feeHaircutPercent: automaticHaircut ? null : parseParameter(parameters.feeHaircutPercent),
   };
 }
