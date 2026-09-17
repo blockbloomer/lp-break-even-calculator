@@ -264,6 +264,6 @@ export default function App() {
         <div><h3>这是条件测算，不是收益预测</h3><p>LP 数量变化按 Uniswap V3 曲线与实际涨跌区间计算，区间内最不利退出点是下沿；损失中已包含配比变化，不再额外扣一次无常损失。本金含已持资产的开仓时价值，历史买入成本不计入。</p><p>稳定币按一美元估值，退出全部换回稳定币。手续费按退出时美元等值估计，不复投、不含激励、不模拟持有价格变化。采用理论连续区间；出区间和进一步下跌不属于“区间内回本”条件。</p><a className="text-link" href="https://app.uniswap.org/whitepaper-v3.pdf" target="_blank" rel="noreferrer">查看 Uniswap V3 公式来源<Icon name="external" /></a></div>
       </div></details>
     </main>
-    <footer className="site-footer"><span>LP「包赚」计算器</span><span>算清成本，再看年化。</span><span>浏览器内计算 · 不读取钱包</span></footer>
+    <footer className="site-footer"><span>LP「包赚」计算器</span><a className="author-link" href="https://x.com/BlockBloomer" target="_blank" rel="noopener noreferrer">作者：青蛙 · @BlockBloomer</a><span>浏览器内计算 · 不读取钱包</span></footer>
   </div>;
 }

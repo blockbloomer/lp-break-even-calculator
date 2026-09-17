@@ -212,8 +212,10 @@ details[open] > summary .summary-detail .icon, details[open].method-panel > summ
 .method-content h3 { font-size: 13px; margin-bottom: 12px; }
 .method-content p { font-size: 12px; color: #66768b; line-height: 1.9; margin-bottom: 11px; max-width: 70ch; }
 .method-content .text-link { font-size: 11px; }
-.site-footer { display: flex; align-items: center; justify-content: space-between; gap: 15px; padding: 25px 0 32px; color: #7a8597; font-size: 11px; }
+.site-footer { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 15px; padding: 25px 0 32px; color: #7a8597; font-size: 11px; }
 .site-footer > span:first-child { color: #56667b; }
+.author-link { display: inline-flex; align-items: center; min-height: 36px; color: var(--blue-dark); font-weight: 500; text-decoration: underline; white-space: nowrap; }
+.author-link:hover { color: var(--blue); }
 .mobile-summary { display: none; }
 
 /* Secondary copy remains readable on both the white and tinted surfaces. */
@@ -303,7 +305,7 @@ details[open] > summary .summary-detail .icon, details[open].method-panel > summ
   .result-metrics strong { font-size: 30px; }
   .scenario-table td { font-size: 15px; }
   .scenario-table td:last-child { font-size: 11px; }
-  .site-footer > span:nth-child(2) { display: none; }
+  .site-footer > span:last-child { flex-basis: 100%; }
 }
 
 @media (max-width: 480px) {
