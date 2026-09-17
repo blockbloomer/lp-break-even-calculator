@@ -41,6 +41,8 @@ svg { display: block; }
 .brand-mark { width: 35px; height: 35px; border-radius: 10px; display: grid; place-items: center; background: var(--blue); color: white; }
 .brand-mark .icon { width: 23px; height: 23px; }
 .brand-divider { color: #a5b0c0; margin: 0 9px; font-weight: 400; }
+.header-meta { display: flex; flex-direction: column; align-items: flex-end; }
+.header-meta .author-link { font-size: 12px; }
 .header-context { display: flex; align-items: center; gap: 9px; font-size: 12px; color: var(--muted); white-space: nowrap; }
 .status-dot, .note-dot { width: 6px; height: 6px; border-radius: 50%; background: #567568; display: inline-block; flex-shrink: 0; }
 .header-separator { padding: 0 4px; color: #a8b0bd; }
@@ -305,12 +307,15 @@ details[open] > summary .summary-detail .icon, details[open].method-panel > summ
   .result-metrics strong { font-size: 30px; }
   .scenario-table td { font-size: 15px; }
   .scenario-table td:last-child { font-size: 11px; }
-  .site-footer > span:last-child { flex-basis: 100%; }
+}
+
+@media (max-width: 600px) {
+  .site-header { min-height: 67px; flex-direction: column; align-items: flex-start; gap: 2px; padding: 14px 0 8px; }
+  .header-meta { width: 100%; flex-direction: row; align-items: center; justify-content: space-between; }
 }
 
 @media (max-width: 480px) {
   .app-shell { padding: 0 16px; }
-  .site-header { min-height: 67px; gap: 10px; }
   .brand { font-size: 15px; gap: 9px; }
   .brand-mark { width: 30px; height: 30px; border-radius: 8px; }
   .brand-mark .icon { width: 21px; height: 21px; }
